@@ -1,0 +1,22 @@
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtual environment
+/.venv/
+/venv/
+/env/
+/ENV/
+/Include/
+/Lib/
+/Scripts/
+/share/
+/etc/
+/pyvenv.cfg
+
+# Nsight Compute profiler captures
+*.ncu-rep
