@@ -44,6 +44,7 @@ class KwD{
 
         size_t m_weightBytes = 0;float* device_weights=nullptr;
 
+        cudaMemPool_t model_memPool;
         cudaEvent_t device_weights_ready;
     public:
         KwD();

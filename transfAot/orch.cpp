@@ -9,8 +9,8 @@ namespace transfAot {
 Trainer::Trainer(KwD* model_weights,cudaStream_t train_stream){
     d_targetPtr = model_weights->getDevicePointer();
     execution_stream=train_stream;
-    cudaEvent_t ready=model_weights->getReadyEvent();
-    cudaStreamWaitEvent(execution_stream,ready,0);
+    cudaEvent_t model_weights_ready=model_weights->getReadyEvent();
+    cudaStreamWaitEvent(execution_stream,model_weights_ready,0);
 }
 KwD::KwD(){
     student=std::make_unique<Trainer>();
@@ -20,6 +20,8 @@ KwD::KwD(){
     cudaStreamCreate(&student_stream);
     cudaStreamCreate(&teacher_stream);
     cudaStreamCreate(&memOps_stream);
+
+    cudaEventCreate(&device_weights_ready);
 }
 KwD::~KwD(){
     cudaStreamDestroy(student_stream);
@@ -33,21 +35,19 @@ void KwD::load_model(const std::string& model_path, size_t totalElements){
     m_weightBytes = totalElements * sizeof(float);
     float* host_pinned_weights = nullptr;
     cudaHostAlloc(&host_pinned_weights, m_weightBytes, cudaHostAllocDefault);
-    model_weights.read(reinterpret_cast<char*>(host_pinned_weights), m_weightBytes);
+    model_weights.read(reinterpret_cast<char*>(host_pinned_weights), m_weightBytes);   
 
-    
-    cudaMemPool_t model_memPool;
-    cudaMemPoolProps poolProps={};
-        poolProps.allocType = cudaMemAllocationTypePinned;
-        poolProps.location.type = cudaMemLocationTypeDevice;
-        poolProps.location.id = 0;
+    cudaMemPoolProps    poolProps={};
+                        poolProps.allocType = cudaMemAllocationTypePinned;
+                        poolProps.location.type = cudaMemLocationTypeDevice;
+                        poolProps.location.id = 0;
     cudaMemPoolCreate(&model_memPool,&poolProps);
     uint64_t threshold=1024*1024*1024;
     cudaMemPoolSetAttribute(model_memPool,cudaMemPoolAttrReleaseThreshold,&threshold);
     cudaMallocAsync(&device_weights,m_weightBytes,model_memPool,memOps_stream);
     
-    cudaEventCreate(&device_weights_ready);
-    cudaMemcpyAsync(/*dst=*/device_weights, /*src=*/host_pinned_weights, m_weightBytes, cudaMemcpyHostToDevice, memOps_stream);
+    
+    cudaMemcpyAsync(device_weights,host_pinned_weights, m_weightBytes, cudaMemcpyHostToDevice, memOps_stream);
     cudaEventRecord(device_weights_ready,memOps_stream);
     cudaStreamSynchronize(memOps_stream);
     cudaFreeHost(host_pinned_weights); 
