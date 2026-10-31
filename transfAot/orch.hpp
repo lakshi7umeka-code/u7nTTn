@@ -4,12 +4,20 @@
 #include <cuda.h>
 
 namespace transfAot{
+class KwD;
+
 class Trainer{
     private:
         float* d_targetPtr = nullptr;
-        cudaStream_t execution_stream;
+        cudaStream_t train_stream=nullptr;
+        cudaStream_t execution_stream=nullptr;
+        
     public:
-        Trainer(KwD* model_weights,cudaStream_t execution_stream);
+        Trainer(KwD* model_weights,cudaStream_t train_stream);
+       
+        void forward();
+        void backwardCompatibility(cudaStream_t student_stream);
+        void backward(cudaStream_t student_stream);
 };
 class ATTN{
     private:
@@ -17,6 +25,9 @@ class ATTN{
         CUfunction attn_kernel;
     public:
         ATTN();
+        ~ATTN();
+        float* forwardAttn();
+        float* backwardAttn();
 };
 class FFN{
     private:
@@ -24,6 +35,9 @@ class FFN{
         CUfunction ffn_kernel;
     public:
         FFN();
+        ~FFN();
+        float* forwardFFn();
+        float* backwardFFn();
 };
 class Encoder{
     private:
@@ -34,6 +48,8 @@ class Encoder{
     public:
         Encoder();
         ~Encoder();
+        float* forwardEnc(float* d_in,int b,int h,int s);
+        float* backwardEnc();
 };
 class KwD{
     private:
@@ -54,4 +70,3 @@ class KwD{
         cudaEvent_t getReadyEvent() const{return device_weights_ready;};
 };
 }
-
