@@ -14,8 +14,18 @@ class ATTN{
     public:
         ATTN();
         ~ATTN();
-        float* forwardAttn(float* d_in,cudaStream_t attn_stream);
-        float* backwardAttn(float* output_gradient, cudaStream_t attn_stream);
+        float* forwardAttn(float* d_in,
+                           float* model_weights,
+                           int batch,
+                           int hidden,
+                           int sequence,
+                           cudaStream_t attn_stream);
+        float* backwardAttn(float* output_gradient,
+                            float* model_weights,
+                            int batch,
+                            int hidden,
+                            int sequence,
+                            cudaStream_t attn_stream);
 };
 class FFN{
     private:
@@ -24,8 +34,18 @@ class FFN{
     public:
         FFN();
         ~FFN();
-        float* forwardFFn(float* FW_attn_out,cudaStream_t ffn_stream);
-        float* backwardFFn(float* output_gradient, cudaStream_t ffn_stream);
+        float* forwardFFn(float* attention_output,
+                          float* model_weights,
+                          int batch,
+                          int hidden,
+                          int sequence,
+                          cudaStream_t ffn_stream);
+        float* backwardFFn(float* output_gradient,
+                           float* model_weights,
+                           int batch,
+                           int hidden,
+                           int sequence,
+                           cudaStream_t ffn_stream);
 };
 class Encoder{
     private:
@@ -36,22 +56,35 @@ class Encoder{
     public:
         Encoder();
         ~Encoder();
-        float* forwardEnc(float* d_in,int b,int h,int s);
-        float* backwardEnc(float* output_gradient);
+        float* forwardEnc(float* d_in, float* model_weights, int batch, int hidden, int sequence);
+        float* backwardEnc(float* output_gradient,
+                           float* model_weights,
+                           int batch,
+                           int hidden,
+                           int sequence);
 };
 class Trainer{
     private:
-        float* d_targetPtr = nullptr;
+        friend class KwD;
+
+        float* d_modelWeights = nullptr;
         cudaStream_t train_stream=nullptr;
         cudaStream_t execution_stream=nullptr;
+        bool trainable=false;
         
         std::unique_ptr<Encoder> encoder_layer;
-    public:
-        Trainer(KwD* model_weights,cudaStream_t train_stream);
-       
+
         float* forward(float* input, int batch, int hidden, int sequence);
-        void backwardCompatibility(cudaStream_t student_stream,float* output_gradient,int batch,int hidden,int sequence);
-        void backward(float* output_gradient, int batch, int hidden, int sequence);
+        float* backwardCompatibility(cudaStream_t requested_stream,
+                                     float* output_gradient,
+                                     int batch,
+                                     int hidden,
+                                     int sequence);
+    public:
+        Trainer(float* model_weights,
+                cudaEvent_t weights_ready,
+                cudaStream_t train_stream,
+                bool trainable);
 };
 class KwD{
     private:
@@ -60,15 +93,21 @@ class KwD{
 
         cudaStream_t student_stream, teacher_stream, memOps_stream; 
 
-        size_t m_weightBytes = 0;float* device_weights=nullptr;
+        size_t m_weightBytes = 0;
+        float* student_weights=nullptr;
+        float* teacher_weights=nullptr;
 
-        cudaMemPool_t model_memPool;
-        cudaEvent_t device_weights_ready;
+        cudaMemPool_t model_memPool=nullptr;
+        cudaEvent_t device_weights_ready=nullptr;
     public:
         KwD();
         ~KwD();
         void load_model(const std::string& model_path, size_t totalElements);
-        float* getDevicePointer() const{return device_weights;};
+        float* teacherForward(float* input, int batch, int hidden, int sequence);
+        float* studentForward(float* input, int batch, int hidden, int sequence);
+        float* studentBackward(float* output_gradient, int batch, int hidden, int sequence);
+        float* getStudentDevicePointer() const{return student_weights;};
+        float* getTeacherDevicePointer() const{return teacher_weights;};
         cudaEvent_t getReadyEvent() const{return device_weights_ready;};
 };
 }
