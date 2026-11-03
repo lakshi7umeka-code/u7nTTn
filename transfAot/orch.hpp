@@ -1,24 +1,12 @@
 #include <iostream>
 #include <memory>
+#include <string>
 #include <cuda_runtime.h>
 #include <cuda.h>
 
 namespace transfAot{
 class KwD;
 
-class Trainer{
-    private:
-        float* d_targetPtr = nullptr;
-        cudaStream_t train_stream=nullptr;
-        cudaStream_t execution_stream=nullptr;
-        
-    public:
-        Trainer(KwD* model_weights,cudaStream_t train_stream);
-       
-        void forward();
-        void backwardCompatibility(cudaStream_t student_stream);
-        void backward(cudaStream_t student_stream);
-};
 class ATTN{
     private:
         CUmodule attn_module;
@@ -26,8 +14,8 @@ class ATTN{
     public:
         ATTN();
         ~ATTN();
-        float* forwardAttn();
-        float* backwardAttn();
+        float* forwardAttn(float* d_in,cudaStream_t attn_stream);
+        float* backwardAttn(float* output_gradient, cudaStream_t attn_stream);
 };
 class FFN{
     private:
@@ -36,8 +24,8 @@ class FFN{
     public:
         FFN();
         ~FFN();
-        float* forwardFFn();
-        float* backwardFFn();
+        float* forwardFFn(float* FW_attn_out,cudaStream_t ffn_stream);
+        float* backwardFFn(float* output_gradient, cudaStream_t ffn_stream);
 };
 class Encoder{
     private:
@@ -49,12 +37,26 @@ class Encoder{
         Encoder();
         ~Encoder();
         float* forwardEnc(float* d_in,int b,int h,int s);
-        float* backwardEnc();
+        float* backwardEnc(float* output_gradient);
+};
+class Trainer{
+    private:
+        float* d_targetPtr = nullptr;
+        cudaStream_t train_stream=nullptr;
+        cudaStream_t execution_stream=nullptr;
+        
+        std::unique_ptr<Encoder> encoder_layer;
+    public:
+        Trainer(KwD* model_weights,cudaStream_t train_stream);
+       
+        float* forward(float* input, int batch, int hidden, int sequence);
+        void backwardCompatibility(cudaStream_t student_stream,float* output_gradient,int batch,int hidden,int sequence);
+        void backward(float* output_gradient, int batch, int hidden, int sequence);
 };
 class KwD{
     private:
         std::unique_ptr<Trainer> student, teacher;
-        std::unique_ptr<Encoder> encoder_layer;
+        
 
         cudaStream_t student_stream, teacher_stream, memOps_stream; 
 
