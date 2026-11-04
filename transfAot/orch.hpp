@@ -53,8 +53,10 @@ class Encoder{
         std::unique_ptr<ATTN> attn_layer;
 
         cudaStream_t ffn_stream, attn_stream;
+        cudaEvent_t attention_forward_done=nullptr;
+        cudaEvent_t ffn_backward_done=nullptr;
     public:
-        Encoder();
+        explicit Encoder(cudaEvent_t weights_ready);
         ~Encoder();
         float* forwardEnc(float* d_in, float* model_weights, int batch, int hidden, int sequence);
         float* backwardEnc(float* output_gradient,
@@ -69,7 +71,6 @@ class Trainer{
 
         float* d_modelWeights = nullptr;
         cudaStream_t train_stream=nullptr;
-        cudaStream_t execution_stream=nullptr;
         bool trainable=false;
         
         std::unique_ptr<Encoder> encoder_layer;

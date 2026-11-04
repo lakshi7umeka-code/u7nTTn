@@ -13,10 +13,8 @@ Trainer::Trainer(float* model_weights,
                  bool trainable)
     : d_modelWeights(model_weights),
       train_stream(train_stream),
-      execution_stream(train_stream),
       trainable(trainable){
-    cudaStreamWaitEvent(execution_stream,weights_ready,0);
-    encoder_layer=std::make_unique<Encoder>();
+    encoder_layer=std::make_unique<Encoder>(weights_ready);
 
 }
 float* Trainer::backwardCompatibility(cudaStream_t requested_stream,
@@ -100,15 +98,23 @@ float* KwD::studentBackward(float* output_gradient,int batch,int hidden,int sequ
     return student->backwardCompatibility(student_stream,output_gradient,batch,hidden,sequence);
 }
 /*encoder::constructor & destructor*/
-Encoder::Encoder(){
+Encoder::Encoder(cudaEvent_t weights_ready){
     ffn_layer=std::make_unique<FFN>();
     attn_layer=std::make_unique<ATTN>();
     
     cudaStreamCreate(&ffn_stream);
     cudaStreamCreate(&attn_stream);
+    cudaEventCreateWithFlags(&attention_forward_done,cudaEventDisableTiming);
+    cudaEventCreateWithFlags(&ffn_backward_done,cudaEventDisableTiming);
 
+    cudaStreamWaitEvent(attn_stream,weights_ready,0);
+    cudaStreamWaitEvent(ffn_stream,weights_ready,0);
 }
 Encoder::~Encoder(){
+    cudaStreamSynchronize(attn_stream);
+    cudaStreamSynchronize(ffn_stream);
+    cudaEventDestroy(attention_forward_done);
+    cudaEventDestroy(ffn_backward_done);
     cudaStreamDestroy(ffn_stream);
     cudaStreamDestroy(attn_stream);
 }
@@ -119,6 +125,8 @@ float* Encoder::forwardEnc(float* d_in,
                            int hidden,
                            int sequence){
     float* attn_out=attn_layer->forwardAttn(d_in,model_weights,batch,hidden,sequence,attn_stream);
+    cudaEventRecord(attention_forward_done,attn_stream);
+    cudaStreamWaitEvent(ffn_stream,attention_forward_done,0);
     float* ffn_out=ffn_layer->forwardFFn(attn_out,model_weights,batch,hidden,sequence,ffn_stream);
     return ffn_out;
 }
@@ -128,6 +136,8 @@ float* Encoder::backwardEnc(float* output_gradient,
                             int hidden,
                             int sequence){
     float* attention_output_gradient=ffn_layer->backwardFFn(output_gradient,model_weights,batch,hidden,sequence,ffn_stream);
+    cudaEventRecord(ffn_backward_done,ffn_stream);
+    cudaStreamWaitEvent(attn_stream,ffn_backward_done,0);
     float* input_gradient=attn_layer->backwardAttn(attention_output_gradient,model_weights,batch,hidden,sequence,attn_stream);
     return input_gradient;
 }
