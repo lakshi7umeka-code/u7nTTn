@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <cuda_runtime.h>
@@ -9,16 +10,24 @@ class KwD;
 
 class ATTN{
     private:
-        CUmodule attn_module;
-        CUfunction attn_kernel;
+        CUmodule attn_module = nullptr;
+        CUfunction attn_kernel = nullptr;
+        float* d_attention_output = nullptr;
+        size_t output_capacity_bytes = 0;
     public:
         ATTN();
         ~ATTN();
-        float* forwardAttn(float* d_in,
-                           float* model_weights,
+        // Q/K/V are [batch, sequence, hidden]; cos/sin are [sequence, head_dim / 2].
+        // Returns softmax(RoPE(Q) RoPE(K)^T) V [batch, sequence, hidden].
+        float* forwardAttn(float* query,
+                           float* key,
+                           float* value,
+                           float* rope_cos,
+                           float* rope_sin,
                            int batch,
                            int hidden,
                            int sequence,
+                           int head_dim,
                            cudaStream_t attn_stream);
         float* backwardAttn(float* output_gradient,
                             float* model_weights,
@@ -53,12 +62,19 @@ class Encoder{
         std::unique_ptr<ATTN> attn_layer;
 
         cudaStream_t ffn_stream, attn_stream;
-        cudaEvent_t attention_forward_done=nullptr;
         cudaEvent_t ffn_backward_done=nullptr;
     public:
         explicit Encoder(cudaEvent_t weights_ready);
         ~Encoder();
-        float* forwardEnc(float* d_in, float* model_weights, int batch, int hidden, int sequence);
+        float* forwardEnc(float* query,
+                          float* key,
+                          float* value,
+                          float* rope_cos,
+                          float* rope_sin,
+                          int batch,
+                          int hidden,
+                          int sequence,
+                          int head_dim);
         float* backwardEnc(float* output_gradient,
                            float* model_weights,
                            int batch,
@@ -75,7 +91,15 @@ class Trainer{
         
         std::unique_ptr<Encoder> encoder_layer;
 
-        float* forward(float* input, int batch, int hidden, int sequence);
+        float* forward(float* query,
+                       float* key,
+                       float* value,
+                       float* rope_cos,
+                       float* rope_sin,
+                       int batch,
+                       int hidden,
+                       int sequence,
+                       int head_dim);
         float* backwardCompatibility(cudaStream_t requested_stream,
                                      float* output_gradient,
                                      int batch,
@@ -104,8 +128,24 @@ class KwD{
         KwD();
         ~KwD();
         void load_model(const std::string& model_path, size_t totalElements);
-        float* teacherForward(float* input, int batch, int hidden, int sequence);
-        float* studentForward(float* input, int batch, int hidden, int sequence);
+        float* teacherForward(float* query,
+                              float* key,
+                              float* value,
+                              float* rope_cos,
+                              float* rope_sin,
+                              int batch,
+                              int hidden,
+                              int sequence,
+                              int head_dim);
+        float* studentForward(float* query,
+                              float* key,
+                              float* value,
+                              float* rope_cos,
+                              float* rope_sin,
+                              int batch,
+                              int hidden,
+                              int sequence,
+                              int head_dim);
         float* studentBackward(float* output_gradient, int batch, int hidden, int sequence);
         float* getStudentDevicePointer() const{return student_weights;};
         float* getTeacherDevicePointer() const{return teacher_weights;};
