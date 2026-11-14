@@ -58,7 +58,7 @@ float* Trainer::forward(float* query,
                         int sequence,
                         int head_dim){
     return encoder_layer->forwardEnc(
-        query,key,value,rope_cos,rope_sin,batch,hidden,sequence,head_dim);
+        query,key,value,rope_cos,rope_sin,batch,hidden,sequence,head_dim,d_modelWeights);
 }
 KwD::KwD(){
     cudaStreamCreate(&student_stream); 
@@ -145,6 +145,7 @@ float* KwD::studentBackward(float* output_gradient,int batch,int hidden,int sequ
 /*encoder::constructor & destructor*/
 Encoder::Encoder(cudaEvent_t weights_ready){
     attn_layer=std::make_unique<ATTN>();
+    ffn_layer=std::make_unique<FFN>();
     
     cudaStreamCreate(&ffn_stream);
     cudaStreamCreate(&attn_stream);
@@ -169,24 +170,28 @@ float* Encoder::forwardEnc(float* query,
                            int batch,
                            int hidden,
                            int sequence,
-                           int head_dim){
-    float* output=attn_layer->forwardAttn(
-        query,key,value,rope_cos,rope_sin,batch,hidden,sequence,head_dim,attn_stream);
-    checkCuda(cudaStreamSynchronize(attn_stream), "cudaStreamSynchronize(attention output)");
-    return output;
+                           int head_dim,
+                           float* d_modelWeights){
+    float* attention_output=attn_layer->forwardAttn(query,key,value,rope_cos,rope_sin,batch,hidden,sequence,head_dim,attn_stream);
+                checkCuda(cudaStreamSynchronize(attn_stream), "cudaStreamSynchronize(attention output)");
+    float* ffn_output = ffn_layer->forwardFFn(attention_output, d_modelWeights, batch, hidden, sequence, ffn_stream);
+                return ffn_output;
+    
+                    
+    
 }
 float* Encoder::backwardEnc(float* output_gradient,
-                            float* model_weights,
+                            float* d_modelWeights,
                             int batch,
                             int hidden,
                             int sequence){
     if(!ffn_layer){
         throw std::logic_error("Backward is unavailable until the FFN kernel is implemented.");
     }
-    float* attention_output_gradient=ffn_layer->backwardFFn(output_gradient,model_weights,batch,hidden,sequence,ffn_stream);
+    float* attention_output_gradient=ffn_layer->backwardFFn(output_gradient,d_modelWeights,batch,hidden,sequence,ffn_stream);
     cudaEventRecord(ffn_backward_done,ffn_stream);
     cudaStreamWaitEvent(attn_stream,ffn_backward_done,0);
-    float* input_gradient=attn_layer->backwardAttn(attention_output_gradient,model_weights,batch,hidden,sequence,attn_stream);
+    float* input_gradient=attn_layer->backwardAttn(attention_output_gradient,d_modelWeights,batch,hidden,sequence,attn_stream);
     return input_gradient;
 }
 /*forwarded to encoder attn & ffn*/
@@ -290,7 +295,7 @@ float* ATTN::forwardAttn(float* query,
 
     for(int batch_index = 0; batch_index < batch; ++batch_index){
         const size_t input_offset =
-            static_cast<size_t>(batch_index) * input_elements_per_batch;
+        static_cast<size_t>(batch_index) * input_elements_per_batch;
         const size_t output_offset = input_offset;
         CUdeviceptr q_ptr = reinterpret_cast<CUdeviceptr>(query + input_offset);
         CUdeviceptr k_ptr = reinterpret_cast<CUdeviceptr>(key + input_offset);
@@ -354,6 +359,33 @@ float* FFN::forwardFFn(float* attention_output,
                        int hidden,
                        int sequence,
                        cudaStream_t ffn_stream){
+
+                        //myself_try    m*k
+                        int m=sequence;
+                        int k=hidden;
+                        CUdeviceptr attention_output_ptr=reinterpret_cast<CUdeviceptr>(attention_output);
+                        CUdeviceptr model_weights_ptr=reinterpret_cast<CUdeviceptr>(model_weights);
+                        CUdeviceptr ffn_out_ptr=reinterpret_cast<CUdeviceptr>(ffn_out);
+                        void* args[] ={
+                            &m,
+                            &k,
+                            &stride_am,
+                            &stride_ak,
+                            &attention_output_ptr,
+                            &model_weights_ptr,
+                            &ffn_out_ptr,
+                            &batch,
+                            &hidden,
+                            &sequence
+                        };
+                        checkCu(cuLaunchKernel(ffn_kernel,
+                                                1,1,1,
+                                                1,1,1,
+                                                0,
+                                                reinterpret_cast<CUstream>(ffn_stream),
+                                                args,
+                                                nullptr),"cuLaunchKernel(ffn_kernel)");
+                        //
     return nullptr;
 }
 float* FFN::backwardFFn(float* output_gradient,

@@ -74,9 +74,10 @@ class Encoder{
                           int batch,
                           int hidden,
                           int sequence,
-                          int head_dim);
+                          int head_dim,
+                          float* d_modelWeights);
         float* backwardEnc(float* output_gradient,
-                           float* model_weights,
+                           float* d_modelWeights,
                            int batch,
                            int hidden,
                            int sequence);
